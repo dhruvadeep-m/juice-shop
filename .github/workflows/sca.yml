@@ -47,12 +47,12 @@ jobs:
         run: grype sbom:bom.json -o json > grype-report.json
         continue-on-error: true
 
-      - name: Scan SBOM → SARIF report
-        run: grype sbom:bom.json -o sarif > grype-results.sarif
+      - name: Scan Directory → SARIF report
+        run: grype dir:. -o sarif > grype-results.sarif
         continue-on-error: true
 
       - name: Upload SARIF to GitHub Security Dashboard
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: grype-results.sarif
 
