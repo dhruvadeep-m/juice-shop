@@ -1,0 +1,48 @@
+name: SCA Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sca:
+    name: Software Composition Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          npm install -g @cyclonedx/cyclonedx-npm
+          cyclonedx-npm --package-lock-only --output-file bom.json
+        continue-on-error: true
+
+      - name: Install Grype
+        run: |
+          curl -sSfL \
+            https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+
+      - name: Scan SBOM with Grype
+        run: grype sbom:bom.json -o json > grype-report.json
+        continue-on-error: true
+
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-bom
+          path: bom.json
+
+      - name: Upload Vulnerability Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-report
+          path: grype-report.json
