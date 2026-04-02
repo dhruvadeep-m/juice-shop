@@ -19,11 +19,18 @@ jobs:
         with:
           node-version: "18"
 
+      - name: Install Dependencies
+        run: npm ci --ignore-scripts
+
       - name: Generate SBOM (CycloneDX)
         run: |
           npm install -g @cyclonedx/cyclonedx-npm
-          cyclonedx-npm --package-lock-only --output-file bom.json
-        continue-on-error: true
+          cyclonedx-npm --output-file bom.json
+
+      - name: Verify SBOM was created
+        run: |
+          echo "SBOM file size:"
+          wc -c bom.json
 
       - name: Install Grype
         run: |
