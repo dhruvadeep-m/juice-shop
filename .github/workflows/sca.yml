@@ -47,6 +47,99 @@ jobs:
         run: grype sbom:bom.json -o json > grype-report.json
         continue-on-error: true
 
+      - name: Generate HTML Vulnerability Report
+        run: |
+          python3 << 'EOF'
+          import json
+
+          with open('grype-report.json') as f:
+              data = json.load(f)
+
+          matches = data.get('matches', [])
+
+          severity_color = {
+              'Critical':  '#ff4444',
+              'High':      '#ff8800',
+              'Medium':    '#ffcc00',
+              'Low':       '#4caf50',
+              'Negligible':'#aaaaaa',
+              'Unknown':   '#aaaaaa'
+          }
+
+          rows = ""
+          for m in matches:
+              vuln     = m.get('vulnerability', {})
+              artifact = m.get('artifact', {})
+              severity = vuln.get('severity', 'Unknown')
+              color    = severity_color.get(severity, '#aaaaaa')
+              fix_versions = vuln.get('fix', {}).get('versions', [])
+              fix      = fix_versions[0] if fix_versions else 'No fix available'
+              cve_id   = vuln.get('id', '')
+              nvd_link = f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+
+              rows += f"""
+              <tr>
+                <td>{artifact.get('name', '')}</td>
+                <td>{artifact.get('version', '')}</td>
+                <td><a href="{nvd_link}" style="color:#4da6ff">{cve_id}</a></td>
+                <td><span style="color:{color};font-weight:bold">{severity}</span></td>
+                <td>{fix}</td>
+              </tr>"""
+
+          counts = {}
+          for m in matches:
+              s = m.get('vulnerability', {}).get('severity', 'Unknown')
+              counts[s] = counts.get(s, 0) + 1
+
+          severity_order = ['Critical', 'High', 'Medium', 'Low', 'Negligible', 'Unknown']
+          summary = " &nbsp;|&nbsp; ".join(
+              f"<span style='color:{severity_color.get(k,'#aaa')};font-weight:bold'>{k}: {counts[k]}</span>"
+              for k in severity_order if k in counts
+          )
+
+          html = f"""<!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>Vulnerability Report</title>
+            <style>
+              body  {{ font-family: Arial, sans-serif; background:#1a1a1a; color:#fff; margin:30px; }}
+              h1    {{ color:#ffffff; }}
+              .meta {{ color:#aaaaaa; margin-bottom:20px; font-size:15px; }}
+              table {{ border-collapse:collapse; width:100%; }}
+              th    {{ background:#2d2d2d; padding:12px; text-align:left;
+                       border-bottom:2px solid #444; color:#ccc; }}
+              td    {{ padding:10px; border-bottom:1px solid #2d2d2d; font-size:14px; }}
+              tr:hover {{ background:#242424; }}
+              a     {{ text-decoration:none; }}
+              a:hover {{ text-decoration:underline; }}
+            </style>
+          </head>
+          <body>
+            <h1>🔍 Vulnerability Report</h1>
+            <p class="meta">
+              Total vulnerabilities: <strong>{len(matches)}</strong>
+              &nbsp;&nbsp;{summary}
+            </p>
+            <table>
+              <tr>
+                <th>Package</th>
+                <th>Version</th>
+                <th>CVE ID</th>
+                <th>Severity</th>
+                <th>Fix Version</th>
+              </tr>
+              {rows}
+            </table>
+          </body>
+          </html>"""
+
+          with open('vulnerability-report.html', 'w') as f:
+              f.write(html)
+
+          print(f"✅ Report generated — {len(matches)} vulnerabilities found")
+          EOF
+
       - name: Scan Directory → SARIF report
         run: grype dir:. -o sarif > grype-results.sarif
         continue-on-error: true
@@ -62,8 +155,14 @@ jobs:
           name: sbom-bom
           path: bom.json
 
-      - name: Upload Vulnerability Report Artifact
+      - name: Upload Vulnerability Report (JSON)
         uses: actions/upload-artifact@v4
         with:
-          name: vulnerability-report
+          name: vulnerability-report-json
           path: grype-report.json
+
+      - name: Upload Vulnerability Report (HTML)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-report-html
+          path: vulnerability-report.html
