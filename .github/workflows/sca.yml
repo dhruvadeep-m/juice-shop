@@ -4,11 +4,18 @@ on:
   push:
     branches:
       - master
+  pull_request:
+    branches:
+      - master
 
 jobs:
   sca:
     name: Software Composition Analysis
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write
 
     steps:
       - name: Checkout Code
@@ -28,9 +35,7 @@ jobs:
           cyclonedx-npm --output-file bom.json
 
       - name: Verify SBOM was created
-        run: |
-          echo "SBOM file size:"
-          wc -c bom.json
+        run: wc -c bom.json
 
       - name: Install Grype
         run: |
@@ -38,9 +43,18 @@ jobs:
             https://raw.githubusercontent.com/anchore/grype/main/install.sh \
             | sh -s -- -b /usr/local/bin
 
-      - name: Scan SBOM with Grype
+      - name: Scan SBOM → JSON report
         run: grype sbom:bom.json -o json > grype-report.json
         continue-on-error: true
+
+      - name: Scan SBOM → SARIF report
+        run: grype sbom:bom.json -o sarif > grype-results.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Security Dashboard
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: grype-results.sarif
 
       - name: Upload SBOM Artifact
         uses: actions/upload-artifact@v4
