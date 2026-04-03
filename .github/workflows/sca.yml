@@ -166,3 +166,79 @@ jobs:
         with:
           name: vulnerability-report-html
           path: vulnerability-report.html
+      
+      - name: Post Summary to Slack
+        if: always()
+        run: |
+          python3 << 'EOF'
+          import json, urllib.request
+
+          with open('grype-report.json') as f:
+              data = json.load(f)
+
+          matches = data.get('matches', [])
+
+          counts = {}
+          for m in matches:
+              s = m.get('vulnerability', {}).get('severity', 'Unknown')
+              counts[s] = counts.get(s, 0) + 1
+
+          critical  = counts.get('Critical', 0)
+          high      = counts.get('High', 0)
+          medium    = counts.get('Medium', 0)
+          low       = counts.get('Low', 0)
+          total     = len(matches)
+
+          repo    = "${{ github.repository }}"
+          run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          actor   = "${{ github.actor }}"
+          branch  = "${{ github.ref_name }}"
+
+          payload = {
+              "blocks": [
+                  {
+                      "type": "header",
+                      "text": {
+                          "type": "plain_text",
+                          "text": "🔍 SCA Vulnerability Report"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "fields": [
+                          {"type": "mrkdwn", "text": f"*Repo:*\n{repo}"},
+                          {"type": "mrkdwn", "text": f"*Branch:*\n{branch}"},
+                          {"type": "mrkdwn", "text": f"*Triggered by:*\n{actor}"},
+                          {"type": "mrkdwn", "text": f"*Total Vulnerabilities:*\n{total}"}
+                      ]
+                  },
+                  {
+                      "type": "section",
+                      "fields": [
+                          {"type": "mrkdwn", "text": f"🔴 *Critical:* {critical}"},
+                          {"type": "mrkdwn", "text": f"🟠 *High:* {high}"},
+                          {"type": "mrkdwn", "text": f"🟡 *Medium:* {medium}"},
+                          {"type": "mrkdwn", "text": f"🟢 *Low:* {low}"}
+                      ]
+                  },
+                  {
+                      "type": "actions",
+                      "elements": [
+                          {
+                              "type": "button",
+                              "text": {"type": "plain_text", "text": "View Full Report"},
+                              "url": run_url
+                          }
+                      ]
+                  }
+              ]
+          }
+
+          req = urllib.request.Request(
+              "${{ secrets.SLACK_WEBHOOK_URL }}",
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"}
+          )
+          urllib.request.urlopen(req)
+          print("✅ Slack notification sent")
+          EOF
