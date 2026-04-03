@@ -179,60 +179,85 @@ jobs:
           matches = data.get('matches', [])
 
           counts = {}
+          by_severity = {}
           for m in matches:
               s = m.get('vulnerability', {}).get('severity', 'Unknown')
               counts[s] = counts.get(s, 0) + 1
+              by_severity.setdefault(s, []).append(m)
 
-          critical  = counts.get('Critical', 0)
-          high      = counts.get('High', 0)
-          medium    = counts.get('Medium', 0)
-          low       = counts.get('Low', 0)
-          total     = len(matches)
+          critical = counts.get('Critical', 0)
+          high     = counts.get('High', 0)
+          medium   = counts.get('Medium', 0)
+          low      = counts.get('Low', 0)
+          total    = len(matches)
 
-          repo    = "${{ github.repository }}"
-          run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          actor   = "${{ github.actor }}"
-          branch  = "${{ github.ref_name }}"
+          repo     = "${{ github.repository }}"
+          actor    = "${{ github.actor }}"
+          branch   = "${{ github.ref_name }}"
+          run_url  = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          payload = {
-              "blocks": [
-                  {
-                      "type": "header",
-                      "text": {
-                          "type": "plain_text",
-                          "text": "🔍 SCA Vulnerability Report"
-                      }
-                  },
-                  {
-                      "type": "section",
-                      "fields": [
-                          {"type": "mrkdwn", "text": f"*Repo:*\n{repo}"},
-                          {"type": "mrkdwn", "text": f"*Branch:*\n{branch}"},
-                          {"type": "mrkdwn", "text": f"*Triggered by:*\n{actor}"},
-                          {"type": "mrkdwn", "text": f"*Total Vulnerabilities:*\n{total}"}
-                      ]
-                  },
-                  {
-                      "type": "section",
-                      "fields": [
-                          {"type": "mrkdwn", "text": f"🔴 *Critical:* {critical}"},
-                          {"type": "mrkdwn", "text": f"🟠 *High:* {high}"},
-                          {"type": "mrkdwn", "text": f"🟡 *Medium:* {medium}"},
-                          {"type": "mrkdwn", "text": f"🟢 *Low:* {low}"}
-                      ]
-                  },
-                  {
-                      "type": "actions",
-                      "elements": [
-                          {
-                              "type": "button",
-                              "text": {"type": "plain_text", "text": "View Full Report"},
-                              "url": run_url
-                          }
-                      ]
-                  }
-              ]
-          }
+          def build_vuln_lines(severity, emoji, limit=10):
+              items = by_severity.get(severity, [])
+              lines = []
+              for m in items[:limit]:
+                  vuln     = m.get('vulnerability', {})
+                  artifact = m.get('artifact', {})
+                  name     = artifact.get('name', '?')
+                  version  = artifact.get('version', '?')
+                  cve      = vuln.get('id', '?')
+                  fix_list = vuln.get('fix', {}).get('versions', [])
+                  fix      = fix_list[0] if fix_list else 'No fix'
+                  lines.append(f"{emoji} *{name}* `{version}` — <https://nvd.nist.gov/vuln/detail/{cve}|{cve}> → fix: `{fix}`")
+              if len(items) > limit:
+                  lines.append(f"_...and {len(items) - limit} more {severity} vulnerabilities_")
+              return "\n".join(lines) if lines else f"_No {severity} vulnerabilities_"
+
+          critical_text = build_vuln_lines('Critical', '🔴')
+          high_text     = build_vuln_lines('High', '🟠')
+
+          blocks = [
+              {
+                  "type": "header",
+                  "text": {"type": "plain_text", "text": "🔍 SCA Vulnerability Report"}
+              },
+              {
+                  "type": "section",
+                  "fields": [
+                      {"type": "mrkdwn", "text": f"*Repo:*\n{repo}"},
+                      {"type": "mrkdwn", "text": f"*Branch:*\n{branch}"},
+                      {"type": "mrkdwn", "text": f"*Triggered by:*\n{actor}"},
+                      {"type": "mrkdwn", "text": f"*Total:*\n{total}"}
+                  ]
+              },
+              {
+                  "type": "section",
+                  "fields": [
+                      {"type": "mrkdwn", "text": f"🔴 *Critical:* {critical}"},
+                      {"type": "mrkdwn", "text": f"🟠 *High:* {high}"},
+                      {"type": "mrkdwn", "text": f"🟡 *Medium:* {medium}"},
+                      {"type": "mrkdwn", "text": f"🟢 *Low:* {low}"}
+                  ]
+              },
+              {"type": "divider"},
+              {
+                  "type": "section",
+                  "text": {"type": "mrkdwn", "text": f"*🔴 Critical Vulnerabilities*\n{critical_text}"}
+              },
+              {"type": "divider"},
+              {
+                  "type": "section",
+                  "text": {"type": "mrkdwn", "text": f"*🟠 High Vulnerabilities*\n{high_text}"}
+              },
+              {"type": "divider"},
+              {
+                  "type": "context",
+                  "elements": [
+                      {"type": "mrkdwn", "text": f"<{run_url}|View full report + download artifacts>"}
+                  ]
+              }
+          ]
+
+          payload = {"blocks": blocks}
 
           req = urllib.request.Request(
               "${{ secrets.SLACK_WEBHOOK_URL }}",
@@ -242,3 +267,78 @@ jobs:
           urllib.request.urlopen(req)
           print("✅ Slack notification sent")
           EOF
+      # - name: Post Summary to Slack
+      #   if: always()
+      #   run: |
+      #     python3 << 'EOF'
+      #     import json, urllib.request
+
+      #     with open('grype-report.json') as f:
+      #         data = json.load(f)
+
+      #     matches = data.get('matches', [])
+
+      #     counts = {}
+      #     for m in matches:
+      #         s = m.get('vulnerability', {}).get('severity', 'Unknown')
+      #         counts[s] = counts.get(s, 0) + 1
+
+      #     critical  = counts.get('Critical', 0)
+      #     high      = counts.get('High', 0)
+      #     medium    = counts.get('Medium', 0)
+      #     low       = counts.get('Low', 0)
+      #     total     = len(matches)
+
+      #     repo    = "${{ github.repository }}"
+      #     run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      #     actor   = "${{ github.actor }}"
+      #     branch  = "${{ github.ref_name }}"
+
+      #     payload = {
+      #         "blocks": [
+      #             {
+      #                 "type": "header",
+      #                 "text": {
+      #                     "type": "plain_text",
+      #                     "text": "🔍 SCA Vulnerability Report"
+      #                 }
+      #             },
+      #             {
+      #                 "type": "section",
+      #                 "fields": [
+      #                     {"type": "mrkdwn", "text": f"*Repo:*\n{repo}"},
+      #                     {"type": "mrkdwn", "text": f"*Branch:*\n{branch}"},
+      #                     {"type": "mrkdwn", "text": f"*Triggered by:*\n{actor}"},
+      #                     {"type": "mrkdwn", "text": f"*Total Vulnerabilities:*\n{total}"}
+      #                 ]
+      #             },
+      #             {
+      #                 "type": "section",
+      #                 "fields": [
+      #                     {"type": "mrkdwn", "text": f"🔴 *Critical:* {critical}"},
+      #                     {"type": "mrkdwn", "text": f"🟠 *High:* {high}"},
+      #                     {"type": "mrkdwn", "text": f"🟡 *Medium:* {medium}"},
+      #                     {"type": "mrkdwn", "text": f"🟢 *Low:* {low}"}
+      #                 ]
+      #             },
+      #             {
+      #                 "type": "actions",
+      #                 "elements": [
+      #                     {
+      #                         "type": "button",
+      #                         "text": {"type": "plain_text", "text": "View Full Report"},
+      #                         "url": run_url
+      #                     }
+      #                 ]
+      #             }
+      #         ]
+      #     }
+
+      #     req = urllib.request.Request(
+      #         "${{ secrets.SLACK_WEBHOOK_URL }}",
+      #         data=json.dumps(payload).encode(),
+      #         headers={"Content-Type": "application/json"}
+      #     )
+      #     urllib.request.urlopen(req)
+      #     print("✅ Slack notification sent")
+      #     EOF
